@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*.*.*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -51,9 +54,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Tail ${{ github.ref_name }}'
+          releaseName: 'Logr ${{ github.ref_name }}'
           releaseBody: |
-            ## Tail ${{ github.ref_name }}
+            ## Logr ${{ github.ref_name }}
 
             리얼타임 로그 뷰어 — Unix `tail -f` GUI 대체 앱
 
