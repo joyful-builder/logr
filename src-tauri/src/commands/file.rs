@@ -11,7 +11,7 @@ pub struct LogLine {
     pub timestamp: Option<String>,
 }
 
-fn detect_level(line: &str) -> Option<String> {
+pub fn detect_level(line: &str) -> Option<String> {
     let upper = line.to_uppercase();
     if upper.contains("[ERROR]") || upper.contains("ERROR:") || upper.contains(" ERROR ") {
         Some("ERROR".to_string())
@@ -30,7 +30,7 @@ fn detect_level(line: &str) -> Option<String> {
     }
 }
 
-fn extract_timestamp(line: &str) -> Option<String> {
+pub fn extract_timestamp(line: &str) -> Option<String> {
     if line.len() >= 19 {
         let candidate = &line[..19];
         let bytes = candidate.as_bytes();
@@ -46,7 +46,7 @@ fn extract_timestamp(line: &str) -> Option<String> {
     None
 }
 
-fn decode_content(bytes: &[u8], encoding: &str) -> String {
+pub fn decode_content(bytes: &[u8], encoding: &str) -> String {
     match encoding.to_uppercase().as_str() {
         "EUC-KR" | "EUCKR" => {
             let (cow, _, _) = encoding_rs::EUC_KR.decode(bytes);

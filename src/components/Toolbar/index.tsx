@@ -44,7 +44,7 @@ export default function Toolbar() {
               {activeTab.encoding}
             </span>
             <button
-              className="px-2 py-0.5 rounded text-xs font-medium transition-colors"
+              className="flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-colors"
               style={{
                 backgroundColor: activeTab.isFollowing
                   ? "var(--color-accent)"
@@ -57,6 +57,18 @@ export default function Toolbar() {
               title="Follow 모드 토글 (F)"
             >
               {activeTab.isFollowing ? "● Follow" : "Follow"}
+              <span
+                style={{
+                  opacity: 0.6,
+                  fontSize: 10,
+                  border: "1px solid currentColor",
+                  borderRadius: 2,
+                  padding: "0 2px",
+                  lineHeight: "14px",
+                }}
+              >
+                F
+              </span>
             </button>
           </>
         )}
