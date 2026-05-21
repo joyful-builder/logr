@@ -1,11 +1,14 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import { useTabStore } from "../../stores/tabStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { LogLine } from "../../types";
 import { useFileWatcher } from "../../hooks/useFileWatcher";
+import { useSshWatcher } from "../../hooks/useSshWatcher";
 import SearchBar from "../SearchBar";
+import { useT } from "../../i18n";
 import FilterPanel, { FilterState, createDefaultFilter, LogLevel } from "../FilterPanel";
 
 const LEVEL_COLORS: Record<string, string> = {
@@ -32,26 +35,22 @@ function HighlightedContent({
   color,
   matchStart,
   matchEnd,
+  markColor,
 }: {
   content: string;
   color: string;
   matchStart?: number;
   matchEnd?: number;
+  markColor?: string;
 }) {
   if (matchStart === undefined || matchEnd === undefined) {
     return <span style={{ color }}>{content}</span>;
   }
+  const markBg = markColor ? `${markColor}55` : "rgba(250, 200, 50, 0.45)";
   return (
     <span style={{ color }}>
       {content.slice(0, matchStart)}
-      <mark
-        style={{
-          backgroundColor: "rgba(250, 200, 50, 0.45)",
-          color: "inherit",
-          borderRadius: 2,
-          padding: "0 1px",
-        }}
-      >
+      <mark style={{ backgroundColor: markBg, color: "inherit", borderRadius: 2, padding: "0 1px" }}>
         {content.slice(matchStart, matchEnd)}
       </mark>
       {content.slice(matchEnd)}
@@ -59,7 +58,13 @@ function HighlightedContent({
   );
 }
 
-export default function LogViewer() {
+interface LogViewerProps {
+  onRegisterExport: (fn: (format: "txt" | "csv") => Promise<void>) => void;
+  displayLineCountRef: React.MutableRefObject<number>;
+}
+
+export default function LogViewer({ onRegisterExport, displayLineCountRef }: LogViewerProps) {
+  const t = useT();
   const { getActiveTab, updateTab } = useTabStore();
   const { defaultTailLines } = useSettingsStore();
   const activeTab = getActiveTab();
@@ -79,6 +84,11 @@ export default function LogViewer() {
 
   const parentRef = useRef<HTMLDivElement>(null);
   const atBottomRef = useRef(true);
+  const filePosRef = useRef(0);
+  const activeTabIdRef = useRef(activeTab?.id);
+  activeTabIdRef.current = activeTab?.id;
+  const updateTabRef = useRef(updateTab);
+  updateTabRef.current = updateTab;
 
   // 필터 적용 → 검색 적용 순서로 표시할 줄 결정
   const filteredLines = useMemo(() => {
@@ -87,13 +97,17 @@ export default function LogViewer() {
     const noTextFilter = !filter.includeText && !filter.excludeText;
     if (allSelected && noTextFilter) return lines;
 
+    const contains = filter.caseSensitive
+      ? (text: string, pattern: string) => text.includes(pattern)
+      : (text: string, pattern: string) => text.toLowerCase().includes(pattern.toLowerCase());
+
     return lines.filter((line) => {
-      // 레벨 필터 (레벨 없는 줄은 항상 표시)
-      if (line.level && !filter.levels.has(line.level as LogLevel)) return false;
-      // 포함 텍스트
-      if (filter.includeText && !line.content.toLowerCase().includes(filter.includeText.toLowerCase())) return false;
-      // 제외 텍스트
-      if (filter.excludeText && line.content.toLowerCase().includes(filter.excludeText.toLowerCase())) return false;
+      // 레벨 필터 활성 시: 레벨 없는 줄도 제외, 선택한 레벨만 통과
+      if (!allSelected) {
+        if (!line.level || !filter.levels.has(line.level as LogLevel)) return false;
+      }
+      if (filter.includeText && !contains(line.content, filter.includeText)) return false;
+      if (filter.excludeText && contains(line.content, filter.excludeText)) return false;
       return true;
     });
   }, [lines, filter]);
@@ -103,6 +117,54 @@ export default function LogViewer() {
     return searchMatches.map((m) => filteredLines[m.lineIndex]);
   }, [filteredLines, searchMatches]);
 
+  // displayLines가 커밋될 때마다 내보내기 핸들러를 갱신 (직접 클로저, ref 지연 없음)
+  useLayoutEffect(() => {
+    displayLineCountRef.current = displayLines.length;
+    const snapshot = displayLines;
+    onRegisterExport(async (format: "txt" | "csv") => {
+      if (!snapshot.length) return;
+      const savePath = await save({
+        defaultPath: `export.${format}`,
+        filters: [format === "csv"
+          ? { name: "CSV", extensions: ["csv"] }
+          : { name: "Text", extensions: ["txt"] }],
+      });
+      if (!savePath) return;
+      let content: string;
+      if (format === "csv") {
+        const header = "index,level,timestamp,content\n";
+        const rows = snapshot.map(
+          (l) => `${l.index + 1},${l.level ?? ""},${l.timestamp ?? ""},${JSON.stringify(l.content)}`
+        );
+        content = header + rows.join("\n");
+      } else {
+        content = snapshot.map((l) => l.content).join("\n");
+      }
+      await invoke("export_lines", { path: savePath, content });
+    });
+  }, [displayLines, onRegisterExport, displayLineCountRef]);
+
+  // 하이라이트 규칙 적용: 첫 번째 매칭 규칙의 색상 + 매칭 위치 반환
+  const lineHighlights = useMemo(() => {
+    const rules = activeTab?.highlights ?? [];
+    if (!rules.length) return new Map<number, { color: string; start: number; end: number }>();
+    const map = new Map<number, { color: string; start: number; end: number }>();
+    displayLines.forEach((line, idx) => {
+      for (const rule of rules) {
+        try {
+          const pat = rule.isRegex ? rule.pattern : rule.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const re = new RegExp(pat, "i");
+          const m = re.exec(line.content);
+          if (m) {
+            map.set(idx, { color: rule.color, start: m.index, end: m.index + m[0].length });
+            break;
+          }
+        } catch {}
+      }
+    });
+    return map;
+  }, [displayLines, activeTab?.highlights]);
+
   const virtualizer = useVirtualizer({
     count: displayLines.length,
     getScrollElement: () => parentRef.current,
@@ -110,31 +172,58 @@ export default function LogViewer() {
     overscan: 30,
   });
 
+  const isSshTab = !!activeTab?.sshConnectionId;
+
   // 초기 파일 로드
-  const loadLines = useCallback(async (filePath: string, encoding: string) => {
+  useEffect(() => {
+    if (!activeTab) { setLines([]); setError(null); filePosRef.current = 0; return; }
+    let cancelled = false;
     setIsLoading(true);
     setError(null);
     setLines([]);
     setSearchMatches(null);
     atBottomRef.current = true;
-    try {
-      const result = await invoke<LogLine[]>("read_tail", {
-        path: filePath,
-        lines: defaultTailLines,
-        encoding,
-      });
-      setLines(result);
-    } catch (err) {
-      setError(typeof err === "string" ? err : "파일 읽기 실패");
-    } finally {
-      setIsLoading(false);
-    }
-  }, [defaultTailLines]);
+    filePosRef.current = 0;
 
-  useEffect(() => {
-    if (!activeTab) { setLines([]); setError(null); return; }
-    loadLines(activeTab.filePath, activeTab.encoding);
-  }, [activeTab?.id, activeTab?.filePath]);
+    const loadPromise = isSshTab
+      ? invoke<LogLine[]>("ssh_read_tail", {
+          connectionId: activeTab.sshConnectionId,
+          remotePath: activeTab.filePath,
+          lines: defaultTailLines,
+          encoding: activeTab.encoding,
+        })
+      : invoke<LogLine[]>("read_tail", {
+          path: activeTab.filePath,
+          lines: defaultTailLines,
+          encoding: activeTab.encoding,
+        });
+
+    loadPromise.then(async (result) => {
+      if (!cancelled) {
+        setLines(result);
+        updateTab(activeTab.id, { hasUnread: false });
+        if (!isSshTab) {
+          try {
+            const size = await invoke<number>("get_file_size", { path: activeTab.filePath });
+            if (!cancelled) filePosRef.current = size;
+          } catch {}
+        } else {
+          try {
+            const size = await invoke<number>("ssh_get_file_size", {
+              connectionId: activeTab.sshConnectionId,
+              remotePath: activeTab.filePath,
+            });
+            if (!cancelled) filePosRef.current = size;
+          } catch {}
+        }
+      }
+    }).catch((err) => {
+      if (!cancelled) setError(typeof err === "string" ? err : "파일 읽기 실패");
+    }).finally(() => {
+      if (!cancelled) setIsLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [activeTab?.id, activeTab?.filePath, activeTab?.encoding, defaultTailLines]);
 
   // 새 줄 추가 (follow 모드)
   const handleNewLines = useCallback((newLines: LogLine[]) => {
@@ -145,10 +234,20 @@ export default function LogViewer() {
   }, []);
 
   useFileWatcher(
-    activeTab?.filePath ?? null,
+    isSshTab ? null : (activeTab?.filePath ?? null),
     activeTab?.isFollowing ?? false,
     activeTab?.encoding ?? "UTF-8",
-    handleNewLines
+    handleNewLines,
+    filePosRef
+  );
+
+  useSshWatcher(
+    isSshTab ? (activeTab?.sshConnectionId ?? null) : null,
+    isSshTab ? (activeTab?.filePath ?? null) : null,
+    activeTab?.isFollowing ?? false,
+    activeTab?.encoding ?? "UTF-8",
+    handleNewLines,
+    filePosRef
   );
 
   // 초기 로드 완료 후 하단 스크롤
@@ -158,12 +257,36 @@ export default function LogViewer() {
     }
   }, [isLoading]);
 
-  // follow 모드: 새 줄 도착 시 하단에 있으면 자동 스크롤
+  // 새 줄 도착 시: 하단이면 자동 스크롤, 아니면 hasUnread 표시
   useEffect(() => {
-    if (activeTab?.isFollowing && atBottomRef.current && !searchMatches) {
-      if (lines.length > 0) virtualizer.scrollToIndex(lines.length - 1, { align: "end" });
+    if (lines.length === 0) return;
+    if (atBottomRef.current) {
+      if (activeTab?.isFollowing && !searchMatches) {
+        virtualizer.scrollToIndex(lines.length - 1, { align: "end" });
+      }
+    } else if (activeTabIdRef.current) {
+      updateTabRef.current(activeTabIdRef.current, { hasUnread: true });
     }
   }, [lines.length]);
+
+  // 일시정지 중 파일 변경 감지 (2초 폴링, 로컬 + SSH)
+  useEffect(() => {
+    if (!activeTab || activeTab.isFollowing) return;
+    const tabId = activeTab.id;
+    const filePath = activeTab.filePath;
+    const connectionId = activeTab.sshConnectionId;
+    const intervalId = setInterval(async () => {
+      try {
+        const size = connectionId
+          ? await invoke<number>("ssh_get_file_size", { connectionId, remotePath: filePath })
+          : await invoke<number>("get_file_size", { path: filePath });
+        if (size > filePosRef.current) {
+          updateTabRef.current(tabId, { hasUnread: true });
+        }
+      } catch {}
+    }, 2000);
+    return () => clearInterval(intervalId);
+  }, [activeTab?.id, activeTab?.filePath, activeTab?.isFollowing, isSshTab]);
 
   const handleScroll = useCallback(() => {
     const el = parentRef.current;
@@ -171,6 +294,9 @@ export default function LogViewer() {
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
     atBottomRef.current = atBottom;
     setIsAtBottom(atBottom);
+    if (atBottom && activeTabIdRef.current) {
+      updateTabRef.current(activeTabIdRef.current, { hasUnread: false });
+    }
   }, []);
 
   // ── 검색 ──
@@ -242,8 +368,8 @@ export default function LogViewer() {
         style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-secondary)" }}
       >
         <div style={{ fontSize: 48, opacity: 0.3 }}>📄</div>
-        <div className="text-sm font-medium">파일을 열어 로그를 확인하세요</div>
-        <div className="text-xs opacity-60">사이드바의 "파일 열기" 버튼을 사용하세요</div>
+        <div className="text-sm font-medium">{t("viewer.openFileHint")}</div>
+        <div className="text-xs opacity-60">{t("viewer.openFileSub")}</div>
       </div>
     );
   }
@@ -254,7 +380,7 @@ export default function LogViewer() {
         className="flex flex-col items-center justify-center flex-1 gap-2 select-none"
         style={{ backgroundColor: "var(--color-bg-primary)", color: "var(--color-text-secondary)" }}
       >
-        <div className="text-xs animate-pulse">로딩 중...</div>
+        <div className="text-xs animate-pulse">{t("viewer.loading")}</div>
         <div className="text-xs opacity-60 truncate max-w-xs">{activeTab.filePath.split(/[\\/]/).pop()}</div>
       </div>
     );
@@ -266,7 +392,7 @@ export default function LogViewer() {
         className="flex flex-col items-center justify-center flex-1 gap-2 select-none"
         style={{ backgroundColor: "var(--color-bg-primary)", color: "#f87171" }}
       >
-        <div className="text-sm font-medium">파일 읽기 오류</div>
+        <div className="text-sm font-medium">{t("viewer.fileReadError")}</div>
         <div className="text-xs opacity-80 max-w-sm text-center">{error}</div>
       </div>
     );
@@ -304,7 +430,7 @@ export default function LogViewer() {
             className="flex items-center justify-center h-full italic"
             style={{ color: "var(--color-text-secondary)" }}
           >
-            {searchMatches !== null ? "검색 결과 없음" : "파일이 비어 있습니다"}
+            {searchMatches !== null ? t("viewer.noSearchResults") : t("viewer.fileEmpty")}
           </div>
         ) : (
           <div style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}>
@@ -312,6 +438,17 @@ export default function LogViewer() {
               const line = displayLines[vRow.index];
               const match = searchMatches?.[vRow.index];
               const isCurrent = searchMatches !== null && vRow.index === currentMatchIdx;
+              const hlRule = lineHighlights.get(vRow.index);
+
+              const bgColor = isCurrent
+                ? "rgba(79, 142, 247, 0.15)"
+                : hlRule
+                ? `${hlRule.color}28`
+                : line.level === "ERROR"
+                ? "rgba(248, 113, 113, 0.06)"
+                : "transparent";
+
+              const textColor = hlRule ? hlRule.color : getLevelColor(line.level);
 
               return (
                 <div
@@ -324,11 +461,7 @@ export default function LogViewer() {
                     height: ROW_HEIGHT,
                     display: "flex",
                     alignItems: "center",
-                    backgroundColor: isCurrent
-                      ? "rgba(79, 142, 247, 0.15)"
-                      : line.level === "ERROR"
-                      ? "rgba(248, 113, 113, 0.06)"
-                      : "transparent",
+                    backgroundColor: bgColor,
                   }}
                 >
                   <span
@@ -352,9 +485,10 @@ export default function LogViewer() {
                   >
                     <HighlightedContent
                       content={line.content}
-                      color={getLevelColor(line.level)}
-                      matchStart={match?.matchStart}
-                      matchEnd={match?.matchEnd}
+                      color={textColor}
+                      matchStart={match?.matchStart ?? hlRule?.start}
+                      matchEnd={match?.matchEnd ?? hlRule?.end}
+                      markColor={match ? undefined : hlRule?.color}
                     />
                   </span>
                 </div>
@@ -373,9 +507,12 @@ export default function LogViewer() {
             virtualizer.scrollToIndex(lines.length - 1, { align: "end" });
             atBottomRef.current = true;
             setIsAtBottom(true);
+            if (activeTabIdRef.current) {
+              updateTabRef.current(activeTabIdRef.current, { hasUnread: false });
+            }
           }}
         >
-          ↓ 최신 줄로
+          {t("viewer.jumpToLatest")}
         </div>
       )}
     </div>

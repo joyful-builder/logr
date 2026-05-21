@@ -1,9 +1,30 @@
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::commands::file::{decode_content, detect_level, extract_timestamp, LogLine};
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ReadFromPosResult {
+    pub lines: Vec<LogLine>,
+    pub new_pos: u64,
+}
+
+#[tauri::command]
+pub async fn read_lines_from_pos(
+    path: String,
+    from_pos: u64,
+    encoding: String,
+) -> Result<ReadFromPosResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let (lines, new_pos) = read_new_lines(&path, from_pos, &encoding)?;
+        Ok(ReadFromPosResult { lines, new_pos })
+    })
+    .await
+    .map_err(|e| format!("스레드 오류: {e}"))?
+}
 
 #[derive(Default)]
 pub struct WatcherMap(pub Mutex<HashMap<String, RecommendedWatcher>>);
@@ -63,6 +84,7 @@ fn read_new_lines(path: &str, from_pos: u64, encoding: &str) -> Result<(Vec<LogL
 pub async fn start_watch(
     path: String,
     encoding: String,
+    from_pos: u64,
     app: AppHandle,
     state: State<'_, WatcherMap>,
 ) -> Result<(), String> {
@@ -75,7 +97,9 @@ pub async fn start_watch(
     }
 
     let metadata = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    let last_pos = Arc::new(Mutex::new(metadata.len()));
+    let file_size = metadata.len();
+    let initial_pos = if from_pos > 0 && from_pos <= file_size { from_pos } else { file_size };
+    let last_pos = Arc::new(Mutex::new(initial_pos));
 
     let path_clone = path.clone();
     let app_clone = app.clone();
@@ -96,6 +120,7 @@ pub async fn start_watch(
                             serde_json::json!({
                                 "path": path_clone,
                                 "lines": new_lines,
+                                "new_pos": new_pos,
                             }),
                         );
                     }

@@ -32,6 +32,17 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "DeveloperTool",
+    "shortDescription": "실시간 로그 뷰어",
+    "longDescription": "Unix tail -f를 대체하는 실시간 로그 뷰어. 멀티탭, 검색, 필터, 하이라이트 지원.",
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "wix": {
+        "language": "ko-KR"
+      }
+    }
   }
 }

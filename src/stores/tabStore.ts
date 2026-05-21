@@ -4,7 +4,7 @@ import { Tab } from "../types";
 interface TabStore {
   tabs: Tab[];
   activeTabId: string | null;
-  addTab: (tab: Omit<Tab, "id" | "highlights" | "scrollPosition">) => string;
+  addTab: (tab: Omit<Tab, "id" | "highlights" | "scrollPosition" | "hasUnread">) => string;
   removeTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTab: (id: string, updates: Partial<Tab>) => void;
@@ -16,12 +16,20 @@ export const useTabStore = create<TabStore>((set, get) => ({
   activeTabId: null,
 
   addTab: (tabData) => {
+    const existing = get().tabs.find(
+      (t) => t.filePath === tabData.filePath && t.sshConnectionId === tabData.sshConnectionId
+    );
+    if (existing) {
+      set({ activeTabId: existing.id });
+      return existing.id;
+    }
     const id = `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     const newTab: Tab = {
       ...tabData,
       id,
       highlights: [],
       scrollPosition: 0,
+      hasUnread: false,
     };
     set((state) => ({
       tabs: [...state.tabs, newTab],

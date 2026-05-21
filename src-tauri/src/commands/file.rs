@@ -31,19 +31,14 @@ pub fn detect_level(line: &str) -> Option<String> {
 }
 
 pub fn extract_timestamp(line: &str) -> Option<String> {
-    if line.len() >= 19 {
-        let candidate = &line[..19];
-        let bytes = candidate.as_bytes();
-        let valid = bytes[4] == b'-'
-            && bytes[7] == b'-'
-            && (bytes[10] == b'T' || bytes[10] == b' ')
-            && bytes[13] == b':'
-            && bytes[16] == b':';
-        if valid {
-            return Some(candidate.to_string());
-        }
-    }
-    None
+    let candidate = line.get(..19)?;
+    let bytes = candidate.as_bytes();
+    let valid = bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && (bytes[10] == b'T' || bytes[10] == b' ')
+        && bytes[13] == b':'
+        && bytes[16] == b':';
+    if valid { Some(candidate.to_string()) } else { None }
 }
 
 pub fn decode_content(bytes: &[u8], encoding: &str) -> String {
@@ -63,6 +58,54 @@ pub fn decode_content(bytes: &[u8], encoding: &str) -> String {
         _ => String::from_utf8(bytes.to_vec())
             .unwrap_or_else(|_| String::from_utf8_lossy(bytes).into_owned()),
     }
+}
+
+#[tauri::command]
+pub async fn detect_encoding(path: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        use std::io::Read;
+        let mut file = std::fs::File::open(&path).map_err(|e| format!("파일 열기 실패: {e}"))?;
+        let mut buf = vec![0u8; 8192];
+        let n = file.read(&mut buf).map_err(|e| e.to_string())?;
+        let sample = &buf[..n];
+
+        let result = chardet::detect(sample);
+        let raw = chardet::charset2encoding(&result.0).to_uppercase();
+
+        let normalized = if raw.contains("UTF-16") {
+            "UTF-16".to_string()
+        } else if raw.contains("EUC-KR") || raw.contains("CP949") || raw.contains("949") || raw.contains("WINDOWS-949") {
+            "EUC-KR".to_string()
+        } else if raw.is_empty() || raw.contains("ASCII") || raw.contains("UTF-8") {
+            "UTF-8".to_string()
+        } else {
+            raw
+        };
+        Ok(normalized)
+    })
+    .await
+    .map_err(|e| format!("스레드 오류: {e}"))?
+}
+
+#[tauri::command]
+pub async fn export_lines(path: String, content: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        std::fs::write(&path, content.as_bytes())
+            .map_err(|e| format!("파일 저장 실패: {e}"))
+    })
+    .await
+    .map_err(|e| format!("스레드 오류: {e}"))?
+}
+
+#[tauri::command]
+pub async fn get_file_size(path: String) -> Result<u64, String> {
+    tokio::task::spawn_blocking(move || {
+        std::fs::metadata(&path)
+            .map(|m| m.len())
+            .map_err(|e| format!("메타데이터 실패: {e}"))
+    })
+    .await
+    .map_err(|e| format!("스레드 오류: {e}"))?
 }
 
 fn read_last_n_lines_bytes(
@@ -117,31 +160,35 @@ pub async fn read_tail(
     lines: usize,
     encoding: String,
 ) -> Result<Vec<LogLine>, String> {
-    let file = File::open(&path).map_err(|e| format!("파일 열기 실패: {e}"))?;
-    let file_size = file
-        .metadata()
-        .map_err(|e| format!("메타데이터 실패: {e}"))?
-        .len();
+    tokio::task::spawn_blocking(move || {
+        let file = File::open(&path).map_err(|e| format!("파일 열기 실패: {e}"))?;
+        let file_size = file
+            .metadata()
+            .map_err(|e| format!("메타데이터 실패: {e}"))?
+            .len();
 
-    let content = read_last_n_lines_bytes(file, file_size, lines)?;
-    let text = decode_content(&content, &encoding);
+        let content = read_last_n_lines_bytes(file, file_size, lines)?;
+        let text = decode_content(&content, &encoding);
 
-    let result: Vec<LogLine> = text
-        .lines()
-        .enumerate()
-        .map(|(i, line)| {
-            let raw = line.to_string();
-            let level = detect_level(&raw);
-            let timestamp = extract_timestamp(&raw);
-            LogLine {
-                index: i,
-                content: raw.clone(),
-                raw,
-                level,
-                timestamp,
-            }
-        })
-        .collect();
+        let result: Vec<LogLine> = text
+            .lines()
+            .enumerate()
+            .map(|(i, line)| {
+                let raw = line.to_string();
+                let level = detect_level(&raw);
+                let timestamp = extract_timestamp(&raw);
+                LogLine {
+                    index: i,
+                    content: raw.clone(),
+                    raw,
+                    level,
+                    timestamp,
+                }
+            })
+            .collect();
 
-    Ok(result)
+        Ok(result)
+    })
+    .await
+    .map_err(|e| format!("스레드 오류: {e}"))?
 }

@@ -20,6 +20,8 @@ export interface Tab {
   isFollowing: boolean;
   scrollPosition: number;
   highlights: HighlightRule[];
+  sshConnectionId?: string;
+  hasUnread: boolean;
 }
 
 export interface Bookmark {
@@ -29,6 +31,7 @@ export interface Bookmark {
   encoding: string;
   group?: string;
   lastLine?: number;
+  sshConnectionId?: string;
 }
 
 export interface SearchResult {
@@ -36,4 +39,16 @@ export interface SearchResult {
   content: string;
   matchStart: number;
   matchEnd: number;
+}
+
+export interface SshConnection {
+  id: string;
+  alias: string;
+  host: string;
+  port: number;
+  username: string;
+  authType: "password" | "key" | "agent";
+  password?: string;
+  keyPath?: string;
+  passphrase?: string;
 }

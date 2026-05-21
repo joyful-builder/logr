@@ -1,3 +1,4 @@
+import { useT } from "../../i18n";
 
 export type LogLevel = "ERROR" | "WARN" | "INFO" | "DEBUG";
 
@@ -5,6 +6,7 @@ export interface FilterState {
   levels: Set<LogLevel>;
   includeText: string;
   excludeText: string;
+  caseSensitive: boolean;
 }
 
 interface FilterPanelProps {
@@ -22,10 +24,12 @@ const LEVEL_COLORS: Record<LogLevel, string> = {
 };
 
 export function createDefaultFilter(): FilterState {
-  return { levels: new Set(ALL_LEVELS), includeText: "", excludeText: "" };
+  return { levels: new Set(ALL_LEVELS), includeText: "", excludeText: "", caseSensitive: false };
 }
 
 export default function FilterPanel({ filter, onChange }: FilterPanelProps) {
+  const t = useT();
+
   const toggleLevel = (level: LogLevel) => {
     const next = new Set(filter.levels);
     if (next.has(level)) next.delete(level);
@@ -35,24 +39,16 @@ export default function FilterPanel({ filter, onChange }: FilterPanelProps) {
 
   const allSelected = ALL_LEVELS.every((l) => filter.levels.has(l));
   const toggleAll = () => {
-    onChange({
-      ...filter,
-      levels: allSelected ? new Set() : new Set(ALL_LEVELS),
-    });
+    onChange({ ...filter, levels: allSelected ? new Set() : new Set(ALL_LEVELS) });
   };
 
   return (
     <div
       className="flex items-center gap-3 px-3 shrink-0 text-xs"
-      style={{
-        height: 30,
-        backgroundColor: "var(--color-bg-secondary)",
-        borderBottom: "1px solid var(--color-border)",
-      }}
+      style={{ height: 30, backgroundColor: "var(--color-bg-secondary)", borderBottom: "1px solid var(--color-border)" }}
     >
-      <span style={{ color: "var(--color-text-secondary)", opacity: 0.7 }}>필터:</span>
+      <span style={{ color: "var(--color-text-secondary)", opacity: 0.7 }}>{t("filter.label")}</span>
 
-      {/* 로그 레벨 토글 */}
       <div className="flex items-center gap-1">
         <button
           className="px-1.5 py-0.5 rounded text-xs"
@@ -62,7 +58,7 @@ export default function FilterPanel({ filter, onChange }: FilterPanelProps) {
             border: "1px solid var(--color-border)",
           }}
           onClick={toggleAll}
-          title="전체 선택/해제"
+          title={t("filter.toggleAll")}
         >
           ALL
         </button>
@@ -71,12 +67,8 @@ export default function FilterPanel({ filter, onChange }: FilterPanelProps) {
             key={level}
             className="px-1.5 py-0.5 rounded text-xs font-medium"
             style={{
-              backgroundColor: filter.levels.has(level)
-                ? `${LEVEL_COLORS[level]}22`
-                : "transparent",
-              color: filter.levels.has(level)
-                ? LEVEL_COLORS[level]
-                : "var(--color-text-secondary)",
+              backgroundColor: filter.levels.has(level) ? `${LEVEL_COLORS[level]}22` : "transparent",
+              color: filter.levels.has(level) ? LEVEL_COLORS[level] : "var(--color-text-secondary)",
               border: `1px solid ${filter.levels.has(level) ? LEVEL_COLORS[level] + "66" : "var(--color-border)"}`,
               opacity: filter.levels.has(level) ? 1 : 0.4,
             }}
@@ -87,43 +79,45 @@ export default function FilterPanel({ filter, onChange }: FilterPanelProps) {
         ))}
       </div>
 
-      {/* 포함 텍스트 필터 */}
       <input
         type="text"
         value={filter.includeText}
         onChange={(e) => onChange({ ...filter, includeText: e.target.value })}
-        placeholder="포함..."
+        placeholder={t("filter.includePlaceholder")}
         className="text-xs outline-none bg-transparent border rounded px-2 py-0.5"
-        style={{
-          color: "var(--color-text-primary)",
-          borderColor: "var(--color-border)",
-          width: 100,
-        }}
+        style={{ color: "var(--color-text-primary)", borderColor: "var(--color-border)", width: 100 }}
       />
-
-      {/* 제외 텍스트 필터 */}
       <input
         type="text"
         value={filter.excludeText}
         onChange={(e) => onChange({ ...filter, excludeText: e.target.value })}
-        placeholder="제외..."
+        placeholder={t("filter.excludePlaceholder")}
         className="text-xs outline-none bg-transparent border rounded px-2 py-0.5"
-        style={{
-          color: "var(--color-text-primary)",
-          borderColor: "var(--color-border)",
-          width: 100,
-        }}
+        style={{ color: "var(--color-text-primary)", borderColor: "var(--color-border)", width: 100 }}
       />
 
-      {/* 필터 초기화 */}
-      {(!allSelected || filter.includeText || filter.excludeText) && (
+      <button
+        className="px-1.5 py-0.5 rounded text-xs font-medium transition-colors"
+        style={{
+          backgroundColor: filter.caseSensitive ? "rgba(79,142,247,0.18)" : "transparent",
+          color: filter.caseSensitive ? "var(--color-accent)" : "var(--color-text-secondary)",
+          border: `1px solid ${filter.caseSensitive ? "var(--color-accent)" : "var(--color-border)"}`,
+          opacity: filter.caseSensitive ? 1 : 0.6,
+        }}
+        onClick={() => onChange({ ...filter, caseSensitive: !filter.caseSensitive })}
+        title={t("filter.caseSensitive")}
+      >
+        Aa
+      </button>
+
+      {(!allSelected || filter.includeText || filter.excludeText || filter.caseSensitive) && (
         <button
           className="text-xs hover:opacity-80"
           style={{ color: "var(--color-text-secondary)" }}
           onClick={() => onChange(createDefaultFilter())}
-          title="필터 초기화"
+          title={t("filter.reset")}
         >
-          ✕ 초기화
+          {t("filter.reset")}
         </button>
       )}
     </div>
