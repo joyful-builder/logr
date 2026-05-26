@@ -12,11 +12,12 @@ const ENCODINGS = ["UTF-8", "EUC-KR", "CP949", "UTF-16", "UTF-16BE"];
 
 interface ToolbarProps {
   onExport: (format: "txt" | "csv") => Promise<void>;
+  onClear: () => void;
   displayLineCountRef: React.MutableRefObject<number>;
   hasUpdate?: boolean;
 }
 
-export default function Toolbar({ onExport, displayLineCountRef, hasUpdate = false }: ToolbarProps) {
+export default function Toolbar({ onExport, onClear, displayLineCountRef, hasUpdate = false }: ToolbarProps) {
   const t = useT();
   const { getActiveTab, updateTab } = useTabStore();
   const { language, setLanguage, wrapLines, setWrapLines } = useSettingsStore();
@@ -168,6 +169,16 @@ export default function Toolbar({ onExport, displayLineCountRef, hasUpdate = fal
                 </div>
               )}
             </div>
+
+            {/* 화면 지우기 */}
+            <button
+              className="px-2 py-0.5 rounded text-xs hover:opacity-80"
+              style={{ backgroundColor: "var(--color-bg-tertiary)", color: "var(--color-text-secondary)" }}
+              onClick={onClear}
+              title={t("toolbar.clearHint")}
+            >
+              {t("toolbar.clear")}
+            </button>
 
             {/* 내보내기 드롭다운 */}
             <div style={{ position: "relative" }}>

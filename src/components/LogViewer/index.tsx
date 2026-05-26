@@ -56,10 +56,11 @@ function HighlightedContent({
 
 interface LogViewerProps {
   onRegisterExport: (fn: (format: "txt" | "csv") => Promise<void>) => void;
+  onRegisterClear: (fn: () => void) => void;
   displayLineCountRef: React.MutableRefObject<number>;
 }
 
-export default function LogViewer({ onRegisterExport, displayLineCountRef }: LogViewerProps) {
+export default function LogViewer({ onRegisterExport, onRegisterClear, displayLineCountRef }: LogViewerProps) {
   const t = useT();
   const { getActiveTab, updateTab } = useTabStore();
   const { defaultTailLines, wrapLines } = useSettingsStore();
@@ -93,6 +94,20 @@ export default function LogViewer({ onRegisterExport, displayLineCountRef }: Log
   const atBottomRef = useRef(true);
   const filePosRef = useRef(0);
   const activeTabIdRef = useRef(activeTab?.id);
+
+  // clear 핸들러 등록 — filePosRef는 유지해 새 줄이 계속 들어오게 함
+  useEffect(() => {
+    onRegisterClear(() => {
+      setLines([]);
+      setIsCapped(false);
+      setSearchMatchMap(null);
+      setSearchMatchList([]);
+      searchParamsRef.current = null;
+      lastLineCountRef.current = 0;
+      atBottomRef.current = true;
+      setIsAtBottom(true);
+    });
+  }, [onRegisterClear]);
   activeTabIdRef.current = activeTab?.id;
   const updateTabRef = useRef(updateTab);
   updateTabRef.current = updateTab;
@@ -531,6 +546,18 @@ export default function LogViewer({ onRegisterExport, displayLineCountRef }: Log
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
         e.preventDefault();
         setShowSearch(true);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "l") {
+        e.preventDefault();
+        setLines([]);
+        setIsCapped(false);
+        setSearchMatchMap(null);
+        setSearchMatchList([]);
+        searchParamsRef.current = null;
+        lastLineCountRef.current = 0;
+        atBottomRef.current = true;
+        setIsAtBottom(true);
         return;
       }
       if (isInput) return;

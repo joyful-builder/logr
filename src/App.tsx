@@ -25,9 +25,14 @@ export default function App() {
 
   // LogViewer가 내보내기 핸들러를 등록; Toolbar가 호출
   const exportHandlerRef = useRef<((format: "txt" | "csv") => Promise<void>) | null>(null);
+  const clearHandlerRef = useRef<(() => void) | null>(null);
   const displayLineCountRef = useRef(0);
   const onRegisterExport = useCallback(
     (fn: (format: "txt" | "csv") => Promise<void>) => { exportHandlerRef.current = fn; },
+    []
+  );
+  const onRegisterClear = useCallback(
+    (fn: () => void) => { clearHandlerRef.current = fn; },
     []
   );
 
@@ -70,10 +75,11 @@ export default function App() {
       <TabBar />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <LogViewer onRegisterExport={onRegisterExport} displayLineCountRef={displayLineCountRef} />
+        <LogViewer onRegisterExport={onRegisterExport} onRegisterClear={onRegisterClear} displayLineCountRef={displayLineCountRef} />
       </div>
       <Toolbar
         onExport={(fmt) => exportHandlerRef.current?.(fmt) ?? Promise.resolve()}
+        onClear={() => clearHandlerRef.current?.()}
         displayLineCountRef={displayLineCountRef}
         hasUpdate={updateState.phase === "available"}
       />

@@ -53,6 +53,8 @@ export const translations = {
     "toolbar.wrapLines": "줄바꿈",
     "toolbar.wrapOn": "줄바꿈 켜짐",
     "toolbar.wrapOff": "줄바꿈 꺼짐",
+    "toolbar.clear": "지우기",
+    "toolbar.clearHint": "화면 지우기 (Ctrl+L) — 파일 감시는 계속됩니다",
     // FilterPanel
     "filter.label": "필터:",
     "filter.toggleAll": "전체 선택/해제",
@@ -190,6 +192,8 @@ export const translations = {
     "toolbar.wrapLines": "Wrap",
     "toolbar.wrapOn": "Word wrap on",
     "toolbar.wrapOff": "Word wrap off",
+    "toolbar.clear": "Clear",
+    "toolbar.clearHint": "Clear screen (Ctrl+L) — file watching continues",
     // FilterPanel
     "filter.label": "Filter:",
     "filter.toggleAll": "Toggle all",
